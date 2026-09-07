@@ -23,16 +23,42 @@ def is_greeting(text: str) -> bool:
     return stripped in GREETINGS
 
 
+# Generic question words that appear across almost any message and would
+# cause false matches if treated as meaningful keywords — this caused a real
+# bug: "what" alone matched every question to the first FAQ item containing
+# it ("What are your hours?"), so literally every question returned the same
+# hours answer, confirmed by live testing.
+STOPWORDS = {
+    "what", "when", "where", "which", "does", "that", "this", "with", "from",
+    "have", "about", "would", "could", "should", "there", "their", "your",
+    "name", "clinic",
+}
+
+
 def fallback_answer(user_message: str) -> str:
     """Rule-based fallback used when no OPENAI_API_KEY is configured, so the
     demo runs end-to-end with zero external dependencies."""
     if is_greeting(user_message):
         return f"Hi! I'm the assistant for {BUSINESS['name']}. Ask me about our hours, services, pricing, or booking — happy to help."
-    lower = user_message.lower()
+
+    lower_words = set(re.findall(r"[a-z]+", user_message.lower()))
+    best_item = None
+    best_score = 0
     for item in BUSINESS["faq"]:
-        keywords = [w for w in re.findall(r"[a-z]+", item["q"].lower()) if len(w) > 3]
-        if any(w in lower for w in keywords):
-            return item["a"]
+        keywords = [
+            w for w in re.findall(r"[a-z]+", item["q"].lower())
+            if len(w) > 3 and w not in STOPWORDS
+        ]
+        score = sum(1 for w in keywords if w in lower_words)
+        if score > best_score:
+            best_score = score
+            best_item = item
+    # Require at least 1 real, specific keyword hit (post-stopword-filtering) —
+    # generic words are already excluded above, so any remaining match is a
+    # genuine topic word like "hours", "pricing", "insurance", etc.
+    if best_item and best_score >= 1:
+        return best_item["a"]
+
     if is_lead_intent(user_message):
         return BUSINESS["pricing_note"]
     return "I'm not fully sure about that — I can have the team follow up. Could you leave your contact info?"
